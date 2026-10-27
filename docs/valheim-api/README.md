@@ -53,6 +53,10 @@ One file per subsystem:
   permanent `IsInsideBase()` exemption that leaves base litter
   undecaying, and the age/player-range/tar/piece conditions any fix
   must reproduce exactly.
+- `piece-costs.md` (read at 1.0.20) — `Piece.Requirement`'s fields, and
+  why writing a prefab's `Piece.m_resources` at runtime changes its cost
+  straight away: placement, `HaveRequirements` and the build tooltip all
+  read the prefab's array each time.
 - `teleport-unlocks.md` (read at 1.0.14) — which prefabs vanilla sets
   `m_teleportable = false` on, verified from a live game: the full
   blocked count, the three prefab names `TeleportUnlocks` needed, and

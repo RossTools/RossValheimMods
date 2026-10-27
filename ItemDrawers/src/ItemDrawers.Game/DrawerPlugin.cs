@@ -20,10 +20,12 @@ namespace ItemDrawers.Game
     {
         public const string PluginGuid = "com.rossdwest.itemdrawers";
         public const string PluginName = "ItemDrawers";
-        public const string PluginVersion = "1.2.0";
+        public const string PluginVersion = "1.3.0";
 
         internal static ManualLogSource Log;
         private Harmony _harmony;
+        private BepInEx.Configuration.ConfigEntry<bool> _hotReloadEnabled;
+        private ConfigHotReload _hotReload;
 
         private void Awake()
         {
@@ -112,6 +114,26 @@ namespace ItemDrawers.Game
 
             DrawerConfig.Bind(Config);
 
+            // Copied from RossQoL. Reloading raises SettingChanged, which
+            // re-applies a changed recipe, and Jotunn's ConfigReloaded hook
+            // then pushes changed admin-only entries from a server to every
+            // connected player -- so a server admin's recipe edit reaches
+            // players already in game, with no restart (issue #22).
+            _hotReloadEnabled = Config.Bind("General", "HotReload", true,
+                "Apply edits to this file without a restart. On a server, any server-controlled "
+                + "settings changed this way are pushed to connected players. While connected to a "
+                + "server, local edits to server-controlled settings are ignored.");
+
+            // A failed watcher costs live reloading, never the plugin.
+            try
+            {
+                _hotReload = new ConfigHotReload(Config, Log);
+            }
+            catch (Exception ex)
+            {
+                Log.LogError($"Config reload unavailable; edits apply after a restart: {ex}");
+            }
+
             PrefabManager.OnVanillaPrefabsAvailable += OnPrefabsReady;
             ItemManager.OnItemsRegistered += OnItemsRegistered;
             RegisterDiagCommand();
@@ -119,7 +141,16 @@ namespace ItemDrawers.Game
             Log.LogInfo($"{PluginName} {PluginVersion} loaded");
         }
 
-        private void OnDestroy() => _harmony?.UnpatchSelf();
+        private void Update()
+        {
+            if (_hotReloadEnabled.Value) _hotReload?.Pump();
+        }
+
+        private void OnDestroy()
+        {
+            _hotReload?.Dispose();
+            _harmony?.UnpatchSelf();
+        }
 
         private void OnPrefabsReady()
         {

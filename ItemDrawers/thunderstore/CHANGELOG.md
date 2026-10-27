@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0
+
+- A drawer recipe changed in the server's config now applies to everyone
+  who joins. Before, each player's own config file decided the cost, so a
+  server admin's edit did nothing unless every player made the same edit.
+  Leaving the server puts your own recipe back for single player.
+- Edits to the config file now apply without a restart. On a server,
+  changed recipes and other server settings reach players who are already
+  connected. Turn this off with `[General] HotReload = false`.
+- Every player on a server needs 1.3, so the server and its players agree
+  on what a drawer costs.
+
 ## 1.2.0
 
 - Goes back to how 1.0.16 showed drawers to other mods, because the 1.1.0

@@ -63,3 +63,21 @@ so it doesn't eat clicks meant for the box.
 - Parent custom UI under `GUIManager.CustomGUIFront` (a static `GameObject`).
 - `GUIManager.BlockInput(true/false)` while a modal panel is open; `IsHeadless()`
   guards against building any of this on a dedicated server.
+
+## Admin-only config sync raises `SettingChanged` (read at Jotunn 2.30.2)
+
+Not UI, but a Jotunn trap worth keeping with the others. `SynchronizationManager`
+writes every synced value through `ConfigEntryBase.BoxedValue`, which raises
+BepInEx's `SettingChanged`:
+
+- on joining a server as a client: `SetToDefaultConfigEntries` sets each
+  admin-only entry to its default (`val.BoxedValue = val.DefaultValue`), then
+  `ApplyConfigZPackage` writes the server's value
+  (`val.BoxedValue = TomlTypeConverter.ConvertToValue(...)`) and raises
+  `OnConfigurationSynchronized`;
+- on leaving, `ResetAdminConfigs` restores the values it cached from the local
+  file (`localValue.Key.BoxedValue = localValue.Value`).
+
+So anything read once at startup from an admin-only entry, such as a piece's
+cost baked at registration, silently keeps the player's *local* value on a
+server. Subscribe to the entry's `SettingChanged` and re-apply instead.

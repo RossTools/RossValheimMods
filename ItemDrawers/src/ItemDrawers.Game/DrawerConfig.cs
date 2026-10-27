@@ -45,6 +45,16 @@ namespace ItemDrawers.Game
             // client that could set its own build cost would be building
             // pieces the server never charged it for.
             //
+            // Admin-only alone was not enough, though (issue #22). The piece's
+            // cost is baked at registration, which runs from the player's own
+            // file before they connect anywhere; Jotunn delivered the
+            // server's value afterwards and nothing read it again, so a
+            // server admin's edit changed nothing for anyone. SettingChanged
+            // re-applies the cost whenever the value moves -- Jotunn writes
+            // synced values through BoxedValue, which raises it, on joining
+            // (defaults first, then the server's), on a live server edit, and
+            // when it restores the player's own values on leaving.
+            //
             // Defaults are rendered through the same formatter the parser
             // reads, so the text a fresh install writes into the config file
             // is text that round-trips -- a hand-written default string
@@ -52,14 +62,17 @@ namespace ItemDrawers.Game
             // it.
             foreach (var tier in DrawerTiers.All)
             {
-                Recipes[tier] = config.Bind("Recipe", tier.ToString(),
+                var entry = config.Bind("Recipe", tier.ToString(),
                     RecipeSpec.Format(DrawerTiers.Recipe(tier)),
                     new ConfigDescription(
                         "Build cost, as Item:Count separated by commas -- e.g. FineWood:5,Stone:10. "
                         + "Names are PREFAB names (FineWood, BlackMarble, RoundLog), not the names "
                         + "shown in game. An unparseable or unknown-item recipe is logged and the "
-                        + "default is used instead. Takes effect on restart.",
+                        + "default is used instead. On a server, the server's value applies to everyone.",
                         null, new ConfigurationManagerAttributes { IsAdminOnly = true }));
+                var t = tier;
+                entry.SettingChanged += (_, __) => DrawerPieces.ApplyRecipe(t);
+                Recipes[tier] = entry;
             }
 
             AutoPickupEnabled = config.Bind("Pickup", "Enabled", true,
@@ -153,19 +166,17 @@ namespace ItemDrawers.Game
             var fallback = DrawerTiers.Recipe(tier);
             if (!Recipes.TryGetValue(tier, out var entry) || entry == null) return fallback;
 
-            var spec = RecipeSpec.Parse(entry.Value);
-            string problem = spec.Ok ? UnknownItem(spec.Requirements) : spec.Error;
-            if (problem == null) return spec.Requirements;
-
-            DrawerPlugin.Log.LogWarning(
-                $"Recipe.{tier} is not usable ({problem}); using the default "
-                + $"{RecipeSpec.Format(fallback)} instead.");
-            return fallback;
+            var (requirements, problem) = RecipeChoice.Choose(entry.Value, fallback, KnownItemCheck());
+            if (problem != null)
+                DrawerPlugin.Log.LogWarning(
+                    $"Recipe.{tier} is not usable ({problem}); using the default "
+                    + $"{RecipeSpec.Format(fallback)} instead.");
+            return requirements;
         }
 
         /// <summary>
-        /// The first ingredient Valheim has never heard of, or null if every
-        /// name resolves.
+        /// How RecipeChoice asks whether Valheim has heard of an item, or
+        /// null when nothing can answer yet.
         ///
         /// RecipeSpec deliberately does not do this -- Core has no prefab
         /// database -- but somebody has to, because a requirement naming a
@@ -190,23 +201,17 @@ namespace ItemDrawers.Game
         /// startup. It matches any prefab rather than only items, so it is a
         /// weaker check than "is this craftable" -- but it catches the
         /// misspellings this exists for, and a check that runs is worth more
-        /// than a stricter one that cannot.
+        /// than a stricter one that cannot. (DrawerPieces.ApplyRecipe, which
+        /// needs a real ItemDrop, catches a non-item prefab itself.)
+        ///
+        /// Before Jotunn is ready there is no answer, and inventing a failure
+        /// is exactly the bug described above, so the recipe goes through.
         /// </summary>
-        private static string UnknownItem(IReadOnlyList<(string Item, int Amount)> requirements)
+        private static System.Func<string, bool> KnownItemCheck()
         {
             var prefabs = PrefabManager.Instance;
-
-            // Called before Jotunn is ready. Do not invent a failure: let
-            // the recipe through and let registration report what it cannot
-            // resolve. Guessing wrong in this direction is exactly the bug
-            // described above.
             if (prefabs == null) return null;
-
-            foreach (var r in requirements)
-                if (prefabs.GetPrefab(r.Item) == null)
-                    return $"no item named '{r.Item}'";
-
-            return null;
+            return item => prefabs.GetPrefab(item) != null;
         }
 
         public static int CapacityFor(DrawerTier tier)

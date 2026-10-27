@@ -246,6 +246,66 @@ namespace ItemDrawers.Game
             DrawerPlugin.Log.LogInfo($"Registered {DrawerTiers.PrefabName(tier)}");
         }
 
+        /// <summary>
+        /// Rewrites a registered drawer's build cost from its current
+        /// Recipe config value. Called when that value changes -- in
+        /// practice when Jotunn applies a server's config on joining, or
+        /// restores the player's own on leaving (issue #22: before this, a
+        /// server's recipe never reached anyone, because the cost was only
+        /// ever read once, at registration, from the local file).
+        ///
+        /// Writes Piece.m_resources on the prefab itself. That is what the
+        /// build menu's cost tooltip, Player.HaveRequirements and the
+        /// resource consumption on placement all read, each time, from the
+        /// prefab -- nothing caches a copy -- so the next look at the hammer
+        /// shows the new cost.
+        ///
+        /// Builds real Piece.Requirements, not Jotunn RequirementConfigs.
+        /// RequirementConfig.GetRequirement fills m_resItem with a Jotunn
+        /// mock that is only swapped for the real ItemDrop during
+        /// registration's fix-up pass, which has long finished by now; a mock
+        /// written here would stay a mock. Field values match what
+        /// RegisterOne's RequirementConfig(item, amount, 0, true) produces.
+        ///
+        /// Leaves the cost unchanged, and says so, if any ingredient does
+        /// not resolve to an item: a partial cost would make the drawer
+        /// cheaper than anyone configured.
+        /// </summary>
+        public static void ApplyRecipe(DrawerTier tier)
+        {
+            var prefabs = PrefabManager.Instance;
+            var piece = prefabs?.GetPrefab(DrawerTiers.PrefabName(tier))?.GetComponent<Piece>();
+
+            // Not registered yet (the value changed before
+            // OnVanillaPrefabsAvailable) or registration failed. Either way
+            // RegisterOne reads the current value itself when it runs.
+            if (piece == null) return;
+
+            var recipe = DrawerConfig.RecipeFor(tier);
+            var resources = new Piece.Requirement[recipe.Count];
+            for (int i = 0; i < recipe.Count; i++)
+            {
+                var item = prefabs.GetPrefab(recipe[i].Item)?.GetComponent<ItemDrop>();
+                if (item == null)
+                {
+                    DrawerPlugin.Log.LogWarning(
+                        $"Recipe.{tier}: '{recipe[i].Item}' is not an item; keeping the current cost.");
+                    return;
+                }
+
+                resources[i] = new Piece.Requirement
+                {
+                    m_resItem = item,
+                    m_amount = recipe[i].Amount,
+                    m_amountPerLevel = 0,
+                    m_recover = true,
+                };
+            }
+
+            piece.m_resources = resources;
+            DrawerPlugin.Log.LogInfo($"{DrawerTiers.PrefabName(tier)} now costs {RecipeSpec.Format(recipe)}.");
+        }
+
         public static GameObject BuildPrefab(DrawerTier tier, Mesh sharedMesh, DrawerProportions proportions)
         {
             // Try each candidate donor in order and take the first that is
